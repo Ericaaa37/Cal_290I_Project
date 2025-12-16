@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>TSP Solver Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; }
+    .control-box { position:absolute; top:10px; left:10px; z-index:999; background:white; padding:6px; border-radius:4px; }
+    .info { margin-top:6px; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="control-box">
+    <button id="solveBtn">Solve TSP</button>
+    <button id="clearBtn">Clear</button>
+    <div class="info" id="info">Points: 0, Distance: -</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const TSP_API_URL = "/api/tsp";
+    let map = L.map("map").setView([37.8715, -122.2730], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+    let markers = [], points = [], routeLine = null;
+
+    function updateInfo(distanceText) {
+      document.getElementById("info").textContent = `Points: ${points.length}, Distance: ${distanceText || '-'}`;
+    }
+
+    function addMarker(lat, lng) {
+      const idx = points.length + 1;
+      const m = L.marker([lat, lng], {title: String(idx)}).addTo(map);
+      m.bindTooltip(String(idx), {permanent:true, direction:'top'});
+      m.on('contextmenu', () => {
+        // right click to remove
+        const i = markers.indexOf(m);
+        if (i >= 0) {
+          map.removeLayer(m);
+          markers.splice(i,1);
+          points.splice(i,1);
+          // re-label remaining markers
+          markers.forEach((mk, j) => mk.setTooltipContent(String(j+1)));
+          updateInfo();
+        }
+      });
+      markers.push(m);
+      points.push({lat, lng});
+      updateInfo();
+    }
+
+    map.on("click", e => {
+      const { lat, lng } = e.latlng;
+      addMarker(lat, lng);
+    });
+
+    document.getElementById('clearBtn').onclick = () => {
+      markers.forEach(m => map.removeLayer(m));
+      markers = []; points = [];
+      if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+      updateInfo('-');
+    };
+
+    async function solveTSP() {
+      if (points.length < 2) {
+        alert("Please add at least 2 points");
+        return;
+      }
+      const res = await fetch(TSP_API_URL, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ points })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert("Server error: " + (data.error || JSON.stringify(data)));
+        return;
+      }
+      if (routeLine) map.removeLayer(routeLine);
+      routeLine = L.polyline(data.route.map(p => [p.lat, p.lng])).addTo(map);
+      map.fitBounds(routeLine.getBounds());
+      // update markers tooltip order to match returned route
+      // first remove old markers, then create new ones for clarity
+      // markers.forEach(m => map.removeLayer(m));
+      // markers = [];
+      // points = [];
+      // const uniqueRoute = data.route.length > 1
+        // ? data.route.slice(0, -1)
+        // : data.route;
+
+      // uniqueRoute.forEach((p, i) => {
+        // addMarker(p.lat, p.lng);
+      // });
+      updateInfo((data.distance_km || 0).toFixed(3) + " km");
+    }
+
+    window.solveTSP = solveTSP;
+    document.getElementById('solveBtn').onclick = solveTSP;
+    updateInfo('-');
+  </script>
+</body>
+</html>
